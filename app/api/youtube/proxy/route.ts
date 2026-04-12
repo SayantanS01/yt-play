@@ -31,10 +31,23 @@ export async function GET(req: NextRequest) {
       headers.set("Content-Length", stats.size.toString());
     } else if (fileUrl) {
       // HANDLE REMOTE/STORAGE TRANSPORT
-      const response = await fetch(fileUrl);
+      const isStream = searchParams.get("type") === "stream";
+      
+      const fetchHeaders: any = {};
+      if (isStream) {
+        // Use a consistent User-Agent for streaming to match extraction
+        fetchHeaders["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+      }
+
+      const response = await fetch(fileUrl, { headers: fetchHeaders });
       if (!response.ok) throw new Error("Faulty storage handshake");
       body = response.body;
       headers = new Headers(response.headers);
+
+      // If it's a stream, ensure the browser treats it as audio/mpeg or similar if it doesn't already
+      if (isStream && !headers.get("Content-Type")?.includes("audio")) {
+        headers.set("Content-Type", "audio/mpeg");
+      }
     } else {
       return NextResponse.json({ error: "Resource identifier required" }, { status: 400 });
     }

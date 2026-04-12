@@ -9,7 +9,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const url = await getStreamUrl(id);
-    return NextResponse.json({ url });
+    const proxyUrl = `/api/youtube/proxy?url=${encodeURIComponent(url)}&type=stream`;
+    return NextResponse.json({ url: proxyUrl });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
