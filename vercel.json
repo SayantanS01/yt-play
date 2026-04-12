@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "app/api/youtube/playlist/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "app/api/youtube/download/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "app/api/youtube/proxy/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  }
+}

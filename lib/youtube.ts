@@ -5,8 +5,13 @@ import os from "os";
 
 // Detect if we are running in Vercel or local
 const IS_VERCEL = !!process.env.VERCEL;
+const binDir = path.join(process.cwd(), "bin");
+const localBinary = path.join(binDir, "yt-dlp");
+
 // Binary path: Use bundled binary in Vercel (Linux), or system/local for dev
-const YT_BINARY = IS_VERCEL ? path.join(process.cwd(), "bin", "yt-dlp") : "yt-dlp";
+const YT_BINARY = (IS_VERCEL && fs.existsSync(localBinary)) ? localBinary : "yt-dlp";
+
+console.log(`[YouTube] Init: Platform=${IS_VERCEL ? "VERCEL" : "LOCAL"}, Binary=${YT_BINARY}`);
 
 export interface VideoMetadata {
   id: string;
@@ -124,8 +129,16 @@ const spawnWithTimeout = (args: string[], timeoutMs: number): Promise<{ stdout: 
       if (code === 0) {
         resolve({ stdout, stderr });
       } else {
-        reject(new Error(stderr || "Process exited with error"));
+        const errorMsg = stderr || "Process exited with error";
+        console.error(`[YouTube] Error: Binary exited with code ${code}. Stderr: ${errorMsg}`);
+        reject(new Error(errorMsg));
       }
+    });
+
+    ytProcess.on("error", (err) => {
+      clearTimeout(timeout);
+      console.error(`[YouTube] Critical Spawn Error: ${err.message}. Binary Path: ${YT_BINARY}`);
+      reject(new Error(`Failed to start extraction engine: ${err.message}`));
     });
   });
 };
