@@ -23,17 +23,27 @@ async function installYtDlp() {
 
   console.log(`[Setup] Downloading yt-dlp from ${downloadUrl}...`);
 
-  https.get(downloadUrl, (res) => {
-    if (res.statusCode === 302 || res.statusCode === 301) {
-      // Handle redirect
-      https.get(res.headers.location, downloadBinary);
-    } else {
+  function download(url) {
+    https.get(url, (res) => {
+      const { statusCode } = res;
+      if (statusCode === 301 || statusCode === 302 || statusCode === 307 || statusCode === 308) {
+        // Recursively handle redirects
+        return download(res.headers.location);
+      }
+      
+      if (statusCode !== 200) {
+        console.error(`[Setup] Failed to download: Status Code ${statusCode}`);
+        process.exit(1);
+      }
+
       downloadBinary(res);
-    }
-  }).on('error', (err) => {
-    console.error('[Setup] Failed to download yt-dlp:', err.message);
-    process.exit(1);
-  });
+    }).on('error', (err) => {
+      console.error('[Setup] Failed to download yt-dlp:', err.message);
+      process.exit(1);
+    });
+  }
+
+  download(downloadUrl);
 
   function downloadBinary(response) {
     const file = fs.createWriteStream(targetPath);
