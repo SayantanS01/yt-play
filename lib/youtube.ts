@@ -1,6 +1,12 @@
 import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
+import os from "os";
+
+// Detect if we are running in Vercel or local
+const IS_VERCEL = !!process.env.VERCEL;
+// Binary path: Use bundled binary in Vercel (Linux), or system/local for dev
+const YT_BINARY = IS_VERCEL ? path.join(process.cwd(), "bin", "yt-dlp") : "yt-dlp";
 
 export interface VideoMetadata {
   id: string;
@@ -29,37 +35,38 @@ const parseYtDlpJson = (output: string) => {
 const MOBILE_USER_AGENT = "com.google.android.youtube/19.29.37 (Linux; U; Android 11; en_US; Pixel 5; Build/RD1A.201105.003.C1) gzip";
 const WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
-/**
- * YouTube cookies exported from Windows/standard editors are often in UTF-16 format.
- * yt-dlp requires standard Netscape format in UTF-8. 
- * This helper detects and converts the cookies if necessary.
- */
 const getSanitizedCookiesPath = (): string | null => {
-  const rootCookies = path.join(process.cwd(), "cookies.txt");
-  const envCookies = process.env.YT_COOKIES_PATH;
-  const targetPath = envCookies && fs.existsSync(envCookies) ? envCookies : rootCookies;
+  // Priority 1: Vercel Environment Variable (Content provided by user)
+  if (process.env.YT_COOKIES_CONTENT) {
+    const tempCookiesPath = path.join(os.tmpdir(), "cookies.txt");
+    // Write the cookies content once per session if it doesn't exist
+    if (!fs.existsSync(tempCookiesPath)) {
+      console.log(`[YouTube] Provisioning cookies from ENV var to ${tempCookiesPath}...`);
+      fs.writeFileSync(tempCookiesPath, process.env.YT_COOKIES_CONTENT, 'utf8');
+    }
+    return tempCookiesPath;
+  }
 
-  if (!fs.existsSync(targetPath)) return null;
+  // Priority 2: Local File (Standard Dev)
+  const rootCookies = path.join(process.cwd(), "cookies.txt");
+  if (!fs.existsSync(rootCookies)) return null;
 
   try {
-    const buffer = fs.readFileSync(targetPath);
-    // Check for UTF-16 Byte Order Mark (BOM)
+    const buffer = fs.readFileSync(rootCookies);
     const isUtf16 = (buffer[0] === 0xFF && buffer[1] === 0xFE) || (buffer[0] === 0xFE && buffer[1] === 0xFF);
     
     if (isUtf16) {
       console.log(`[YouTube] Detected UTF-16 encoding in cookies. Converting to UTF-8...`);
       const content = buffer.toString('utf16le');
-      const tempDir = path.join(process.cwd(), "tmp");
-      if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
-      const sanitizedPath = path.join(tempDir, "sanitized_cookies.txt");
+      const sanitizedPath = path.join(os.tmpdir(), "sanitized_cookies.txt");
       fs.writeFileSync(sanitizedPath, content, 'utf8');
       return sanitizedPath;
     }
     
-    return targetPath;
+    return rootCookies;
   } catch (err) {
     console.error(`[YouTube] Failed to sanitize cookies:`, err);
-    return targetPath; // Fallback to original
+    return rootCookies;
   }
 };
 
@@ -93,10 +100,9 @@ const getCommonArgs = () => {
   return args;
 };
 
-// Helper to wrap spawn with a timeout watchdog
 const spawnWithTimeout = (args: string[], timeoutMs: number): Promise<{ stdout: string, stderr: string }> => {
   return new Promise((resolve, reject) => {
-    const ytProcess = spawn("yt-dlp", args);
+    const ytProcess = spawn(YT_BINARY, args);
     let stdout = "";
     let stderr = "";
 
@@ -228,9 +234,7 @@ export const downloadFile = (
   onProgress: (percent: string) => void
 ): Promise<string> => {
   return new Promise((resolve, reject) => {
-    const tempDir = path.join(process.cwd(), "tmp");
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
-
+    const tempDir = os.tmpdir();
     const fileName = `${Date.now()}.${format === "mp3" ? "mp3" : "mp4"}`;
     const filePath = path.join(tempDir, fileName);
 
@@ -239,7 +243,7 @@ export const downloadFile = (
         ? ["-x", "--audio-format", "mp3", "-f", "bestaudio/best"]
         : ["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"];
 
-    const ytProcess = spawn("yt-dlp", [...formatArgs, ...getCommonArgs(), "--prefer-free-formats", "-o", filePath, url]);
+    const ytProcess = spawn(YT_BINARY, [...formatArgs, ...getCommonArgs(), "--prefer-free-formats", "-o", filePath, url]);
     let errorOutput = "";
     
     // Watchdog for progress: Kill process if no progress for 90 seconds

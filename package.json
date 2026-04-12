@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "next lint",
+    "postinstall": "node bin/install-yt-dlp.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1029.0",

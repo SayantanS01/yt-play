@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import fs from "fs";
 import path from "path";
+import os from "os";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
 
     if (localPath) {
       // HANDLE LOCAL TRANSPORT
-      const fullPath = path.join(process.cwd(), "tmp", localPath);
+      const fullPath = path.join(os.tmpdir(), localPath);
       if (!fs.existsSync(fullPath)) {
         return NextResponse.json({ error: "Local resource expired or missing" }, { status: 404 });
       }
@@ -49,7 +50,7 @@ export async function GET(req: NextRequest) {
         await supabase.storage.from("downloads").remove([storagePath]);
       }
       if (localPath) {
-        const fullPath = path.join(process.cwd(), "tmp", localPath);
+        const fullPath = path.join(os.tmpdir(), localPath);
         if (fs.existsSync(fullPath)) {
           console.log(`Cleaning up local resource: ${fullPath}`);
           fs.unlinkSync(fullPath);
