@@ -62,4 +62,7 @@ async function installYtDlp() {
   }
 }
 
-installYtDlp();
+installYtDlp().catch((err) => {
+  console.error('[Setup] Critical error during installation:', err);
+  process.exit(1);
+});

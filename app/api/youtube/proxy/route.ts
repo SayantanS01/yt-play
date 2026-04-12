@@ -60,8 +60,10 @@ export async function GET(req: NextRequest) {
 
     // Use TransformStream to detect stream closure
     const { readable, writable } = new TransformStream({
-      flush() { cleanup(); },
-      cancel() { cleanup(); }
+      transform(chunk, controller) {
+        controller.enqueue(chunk);
+      },
+      flush() { cleanup(); }
     });
 
     if (body.pipeTo) {

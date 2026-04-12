@@ -10,9 +10,12 @@ export async function POST(req: NextRequest) {
   const { getUser } = getKindeServerSession();
   let user = await getUser();
   
-  // Debug mode bypass
   if (!user || !user.id) {
-    user = { id: "mock_debug_user_123" } as any;
+    user = { id: "mock_debug_user_123", email: "debug@example.com" } as any;
+  }
+  
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { url, format } = await req.json();
@@ -26,14 +29,16 @@ export async function POST(req: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       // Heartbeat interval to keep connection alive during long operations
-      let heartbeat: NodeJS.Timeout;
+      let heartbeat: NodeJS.Timeout | undefined = undefined;
       const sendPing = () => {
         try {
           controller.enqueue(encoder.encode(JSON.stringify({ status: "ping" }) + "\n"));
         } catch (e) {
-          clearInterval(heartbeat);
+          if (heartbeat) clearInterval(heartbeat);
         }
       };
+
+      heartbeat = setInterval(sendPing, 15000); // 15s pings
 
       try {
         controller.enqueue(encoder.encode(JSON.stringify({ status: "metadata" }) + "\n"));
@@ -84,7 +89,7 @@ export async function POST(req: NextRequest) {
         // Note: fs.unlinkSync(filePath) is NOT called here because the proxy will handle it after the download.
 
       } catch (error: any) {
-        if (heartbeat!) clearInterval(heartbeat);
+        if (heartbeat) clearInterval(heartbeat);
         console.error("Download route error:", error);
         controller.enqueue(encoder.encode(JSON.stringify({ error: error.message }) + "\n"));
       } finally {
