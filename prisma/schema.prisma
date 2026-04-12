@@ -1,0 +1,50 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model User {
+  id            String    @id // Kinde ID
+  email         String    @unique
+  name          String?
+  role          Role      @default(USER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  stats         UserStats?
+  downloads     Download[]
+}
+
+model UserStats {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  totalYoutubeLinks    Int      @default(0)
+  totalVideosDownloaded Int      @default(0)
+  totalMP3Downloaded   Int      @default(0)
+  topChannels          Json     @default("[]") // [{name: string, priority: number}]
+}
+
+model Download {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  url       String
+  title     String
+  format    String   // "MP4" or "MP3"
+  status    String   // "COMPLETED", "FAILED"
+  createdAt DateTime @default(now())
+}

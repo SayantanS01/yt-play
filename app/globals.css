@@ -1,26 +1,82 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: #0e0e0e;
+  --color-foreground: #ffffff;
+  
+  --color-primary: #FF0000;
+  --color-primary-dim: #eb0000;
+  --color-primary-bright: #ff5b47;
+  
+  --color-surface: #0e0e0e;
+  --color-surface-low: #131313;
+  --color-surface-card: #1a1919;
+  --color-surface-bright: #2c2c2c;
+  
+  --color-muted: #adaaaa;
+  --color-border-ghost: rgba(72, 72, 71, 0.15);
+  
+  --font-display: var(--font-manrope);
+  --font-body: var(--font-inter);
+  
+  --radius-md: 0.75rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  --background: #0e0e0e;
+  --foreground: #ffffff;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-manrope), sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* Glassmorphism Utility */
+.glass {
+  background: rgba(26, 25, 25, 0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--color-border-ghost);
+}
+
+.glass-rail {
+  background: rgba(14, 14, 14, 0.4);
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0e0e0e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1a1919;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2c2c2c;
+}
+
+/* Animations */
+.fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }

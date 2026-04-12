@@ -1,0 +1,82 @@
+import { NextRequest, NextResponse } from "next/server";
+import { supabase } from "@/lib/supabase";
+import fs from "fs";
+import path from "path";
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const fileUrl = searchParams.get("url");
+  const localPath = searchParams.get("localPath");
+  const storagePath = searchParams.get("storagePath");
+  const filename = searchParams.get("filename") || "download";
+
+  try {
+    let body: any;
+    let headers: Headers;
+
+    if (localPath) {
+      // HANDLE LOCAL TRANSPORT
+      const fullPath = path.join(process.cwd(), "tmp", localPath);
+      if (!fs.existsSync(fullPath)) {
+        return NextResponse.json({ error: "Local resource expired or missing" }, { status: 404 });
+      }
+
+      const fileStream = fs.createReadStream(fullPath);
+      body = fileStream;
+      headers = new Headers();
+      headers.set("Content-Type", filename.endsWith(".mp3") ? "audio/mpeg" : "video/mp4");
+      
+      const stats = fs.statSync(fullPath);
+      headers.set("Content-Length", stats.size.toString());
+    } else if (fileUrl) {
+      // HANDLE REMOTE/STORAGE TRANSPORT
+      const response = await fetch(fileUrl);
+      if (!response.ok) throw new Error("Faulty storage handshake");
+      body = response.body;
+      headers = new Headers(response.headers);
+    } else {
+      return NextResponse.json({ error: "Resource identifier required" }, { status: 400 });
+    }
+
+    // Common forced attachment headers
+    const safeFilename = encodeURIComponent(filename).replace(/['()]/g, escape).replace(/\*/g, '%2A');
+    headers.set("Content-Disposition", `attachment; filename="${filename}"; filename*=UTF-8''${safeFilename}`);
+    
+    // Logic to delete the resource after the stream finishes
+    const cleanup = async () => {
+      if (storagePath) {
+        console.log(`Cleaning up cloud resource: ${storagePath}`);
+        await supabase.storage.from("downloads").remove([storagePath]);
+      }
+      if (localPath) {
+        const fullPath = path.join(process.cwd(), "tmp", localPath);
+        if (fs.existsSync(fullPath)) {
+          console.log(`Cleaning up local resource: ${fullPath}`);
+          fs.unlinkSync(fullPath);
+        }
+      }
+    };
+
+    // Use TransformStream to detect stream closure
+    const { readable, writable } = new TransformStream({
+      flush() { cleanup(); },
+      cancel() { cleanup(); }
+    });
+
+    if (body.pipeTo) {
+      body.pipeTo(writable);
+    } else {
+      // Node.js stream fallback
+      const { Readable } = require("stream");
+      Readable.toWeb(body).pipeTo(writable);
+    }
+
+    return new Response(readable, {
+      status: 200,
+      headers: headers,
+    });
+  } catch (error: any) {
+    console.error("Proxy error:", error);
+    return NextResponse.json({ error: "Transport failed: " + error.message }, { status: 500 });
+  }
+}
