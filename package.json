@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "node bin/install-yt-dlp.js"
+    "postinstall": "prisma generate && node bin/install-yt-dlp.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1029.0",
