@@ -266,9 +266,12 @@ export const getPlaylistMetadata = async (url: string): Promise<VideoMetadata[]>
     ];
 
     if (clientType === "tv") {
-      // Rotate extractor args to use TV client for manifest stability
-      const tvArgs = common.map(arg => arg.includes("player_client=") ? arg.replace(/player_client=[^;]+/, "player_client=tv") : arg);
-      console.log(`[YouTube] Rotating to TV client for playlist manifest...`);
+      // For TV client, we MUST strip the po_token as it's not compatible
+      // This provides a "clean" fallback if the authenticated android/ios clients fail
+      const tvArgs = common.filter(arg => !arg.includes("po_token") && !arg.includes("visitor_data"))
+                           .map(arg => arg.includes("player_client=") ? arg.replace(/player_client=[^;]+/, "player_client=tv") : arg);
+      
+      console.log(`[YouTube] Rotating to CLEAN TV client for playlist manifest...`);
       const { stdout } = await spawnWithTimeout([...playlistArgs, ...tvArgs, url], 120000);
       return parseOutput(stdout);
     } else {
