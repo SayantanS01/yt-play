@@ -140,14 +140,20 @@ const getCommonArgs = () => {
     "--js-runtime", "node",
     // IF we have cookies, use "web" client which matches browser cookies
     // IF we have NO cookies, use "android" client for mobile bypass
-    "--extractor-args", `youtube:player_client=${hasCookies ? "web" : "android"}`,
+    // High-resilience extraction tactics:
+    // 1. Use "ios" client which is currently more stable than "android" or "web"
+    // 2. Add geo-bypass to help sync with cookie region
+    // 3. Impersonate a real browser more aggressively
+    "--extractor-args", `youtube:player_client=${hasCookies ? "web,ios" : "ios,android"}`,
+    "--geo-bypass",
+    "--geo-bypass-country", process.env.YT_GEO_BYPASS_COUNTRY || "IN",
     "--user-agent", hasCookies ? WEB_USER_AGENT : MOBILE_USER_AGENT,
-    "--no-cache-dir",
-    "--mark-watched"
+    "--add-header", "Accept-Language:en-US,en;q=0.9",
+    "--no-cache-dir"
   ];
 
   if (sanitizedCookies) {
-    console.log(`[YouTube] Auth Handshake: Using authenticated session.`);
+    console.log(`[YouTube] Auth Handshake: Using authenticated session (Region: ${process.env.YT_GEO_BYPASS_COUNTRY || 'IN'}).`);
     args.push("--cookies", sanitizedCookies);
   } else if (process.env.YT_COOKIES_BROWSER) {
     console.log(`[YouTube] Auth Handshake: Using browser session (${process.env.YT_COOKIES_BROWSER}).`);
