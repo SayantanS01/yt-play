@@ -151,19 +151,23 @@ const getAutomatedPoToken = async () => {
 };
 
 // Common arguments for yt-dlp to handle signatures and warnings
-const getCommonArgs = async (options: { useAuth?: boolean } = { useAuth: true }) => {
+const getCommonArgs = async (options: { useAuth?: boolean, client?: "standard" | "tv" } = { useAuth: true, client: "standard" }) => {
   const sanitizedCookies = getSanitizedCookiesPath();
   const hasCookies = !!sanitizedCookies || !!process.env.YT_COOKIES_BROWSER;
   const poData = await getAutomatedPoToken();
 
   const extractorArgs = [
-    `youtube:player_client=android_test,ios,default`,
+    options.client === "tv" 
+      ? `youtube:player_client=tv` 
+      : `youtube:player_client=android_test,ios,web_embedded,default`,
   ];
 
-  if (poData) {
+  // PoToken is ONLY compatible with standard clients (android/ios/web)
+  // The TV client uses a different signature scheme and will break if po_token is present
+  if (poData && options.client !== "tv") {
     extractorArgs.push(`youtube:po_token=ios+${poData.poToken}`);
     extractorArgs.push(`visitor_data=${poData.visitorData}`);
-  } else if (process.env.YT_PO_TOKEN) {
+  } else if (process.env.YT_PO_TOKEN && options.client !== "tv") {
     extractorArgs.push(`youtube:po_token=${process.env.YT_PO_TOKEN}`);
   }
 
@@ -266,11 +270,7 @@ export const getPlaylistMetadata = async (url: string): Promise<VideoMetadata[]>
     ];
 
     if (clientType === "tv") {
-      // For TV client, we MUST strip the po_token as it's not compatible
-      // This provides a "clean" fallback if the authenticated android/ios clients fail
-      const tvArgs = common.filter(arg => !arg.includes("po_token") && !arg.includes("visitor_data"))
-                           .map(arg => arg.includes("player_client=") ? arg.replace(/player_client=[^;]+/, "player_client=tv") : arg);
-      
+      const tvArgs = await getCommonArgs({ useAuth: false, client: "tv" });
       console.log(`[YouTube] Rotating to CLEAN TV client for playlist manifest...`);
       const { stdout } = await spawnWithTimeout([...playlistArgs, ...tvArgs, url], 120000);
       return parseOutput(stdout);
