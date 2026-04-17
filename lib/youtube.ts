@@ -151,13 +151,13 @@ const getAutomatedPoToken = async () => {
 };
 
 // Common arguments for yt-dlp to handle signatures and warnings
-const getCommonArgs = async () => {
+const getCommonArgs = async (options: { useAuth?: boolean } = { useAuth: true }) => {
   const sanitizedCookies = getSanitizedCookiesPath();
   const hasCookies = !!sanitizedCookies || !!process.env.YT_COOKIES_BROWSER;
   const poData = await getAutomatedPoToken();
 
   const extractorArgs = [
-    `youtube:player_client=android_test,ios`,
+    `youtube:player_client=android_test,ios,default`,
   ];
 
   if (poData) {
@@ -182,14 +182,14 @@ const getCommonArgs = async () => {
     "--no-cache-dir"
   ];
 
-  if (sanitizedCookies) {
+  if (sanitizedCookies && options.useAuth !== false) {
     console.log(`[YouTube] Auth Handshake: Using authenticated session (Region: ${process.env.YT_GEO_BYPASS_COUNTRY || 'IN'}).`);
     args.push("--cookies", sanitizedCookies);
-  } else if (process.env.YT_COOKIES_BROWSER) {
+  } else if (process.env.YT_COOKIES_BROWSER && options.useAuth !== false) {
     console.log(`[YouTube] Auth Handshake: Using browser session (${process.env.YT_COOKIES_BROWSER}).`);
     args.push("--cookies-from-browser", process.env.YT_COOKIES_BROWSER);
   } else {
-    console.warn(`[YouTube] WARNING: No cookies found. Bot detection is likely to trigger.`);
+    console.log(`[YouTube] Auth Handshake: SKIP (Clean session mode).`);
   }
 
   return args;
@@ -252,7 +252,7 @@ export const getMetadata = async (url: string): Promise<VideoMetadata> => {
 };
 
 export const getPlaylistMetadata = async (url: string): Promise<VideoMetadata[]> => {
-  const common = await getCommonArgs();
+  const common = await getCommonArgs({ useAuth: false });
   
   // Strategy: Try standard extraction first, but rotate to TV client for Mixes/Radio
   // The TV client is much more resilient for dynamic playlists
@@ -328,7 +328,7 @@ export const getPlaylistMetadata = async (url: string): Promise<VideoMetadata[]>
 };
 
 export const getStreamUrl = async (id: string): Promise<string> => {
-  const commonArgs = await getCommonArgs();
+  const commonArgs = await getCommonArgs({ useAuth: false });
   const { stdout } = await spawnWithTimeout(["-g", "--no-playlist", ...commonArgs, "-f", "bestaudio/best", `https://www.youtube.com/watch?v=${id}`], 45000);
   const urls = stdout.trim().split("\n").filter(l => l.startsWith("http"));
   if (urls.length > 0) {
@@ -343,7 +343,7 @@ export const downloadFile = async (
   onProgress: (percent: string) => void
 ): Promise<string> => {
   const binary = await ensureBinary();
-  const commonArgs = await getCommonArgs();
+  const commonArgs = await getCommonArgs({ useAuth: false });
   
   return new Promise((resolve, reject) => {
     const tempDir = os.tmpdir();
