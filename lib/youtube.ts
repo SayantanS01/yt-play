@@ -2,12 +2,12 @@ import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
 import os from "os";
-const { generate } = require("youtube-po-token-generator");
 
 // Detect if we are running in Vercel or local
 const IS_VERCEL = !!process.env.VERCEL;
 
 import https from "https";
+import { generate } from "./potoken/generator";
 
 let ytBinaryPromise: Promise<string> | null = null;
 
