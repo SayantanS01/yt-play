@@ -315,8 +315,10 @@ export const downloadFile = async (
 
     const formatArgs =
       format === "mp3"
-        ? ["-x", "--audio-format", "mp3", "-f", "bestaudio/best"]
-        : ["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"];
+        // Use bestaudio but avoid complex post-processing that requires ffmpeg
+        ? ["-f", "bestaudio/best"]
+        // Use best mp4 that doesn't require merging (single-file format)
+        : ["-f", "best[ext=mp4]"];
 
     const ytProcess = spawn(binary, [...formatArgs, ...getCommonArgs(), "--prefer-free-formats", "-o", filePath, url]);
     let errorOutput = "";
@@ -349,6 +351,8 @@ export const downloadFile = async (
     ytProcess.on("close", (code) => {
       clearInterval(watchdog);
       if (code === 0) {
+        // Force one final progress pulse to 100% to ensure UI closure
+        onProgress("100.0");
         resolve(filePath);
       } else {
         reject(new Error(errorOutput || "Download failed"));

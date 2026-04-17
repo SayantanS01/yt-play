@@ -58,7 +58,10 @@ export async function POST(req: NextRequest) {
         // Verification: Ensure bucket is reachable before buffering
         const { data: bucketData, error: bucketError } = await supabase.storage.getBucket("download");
         if (bucketError) {
-          throw new Error(`Cloud storage setup error: '${bucketError.message}'. Please ensure you have created the 'download' bucket in your Supabase dashboard.`);
+          if (bucketError.message.includes("signature verification failed")) {
+            throw new Error(`CRITICAL: Supabase Signature Verification Failed. This means your SUPABASE_SERVICE_ROLE_KEY is invalid. Please update it in Vercel to the latest 'sb_secret_...' key.`);
+          }
+          throw new Error(`Cloud storage setup error: '${bucketError.message}'.`);
         }
 
         // Upload to Supabase to bypass Vercel statelessness
@@ -116,6 +119,7 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(JSON.stringify({ 
           status: "completed", 
           url: `/api/youtube/proxy?url=${encodeURIComponent(fileUrl)}&storagePath=${encodeURIComponent(fileName)}&filename=${encodeURIComponent(metadata.title)}.${format}`,
+          storagePath: fileName,
           isLocal: false
         }) + "\n"));
 
