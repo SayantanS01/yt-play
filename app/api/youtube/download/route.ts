@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
         const fileBuffer = fs.readFileSync(filePath);
         
         const { data: uploadData, error: uploadError } = await supabase.storage
-          .from("downloads")
+          .from("download")
           .upload(fileName, fileBuffer, {
             contentType: format === "mp3" ? "audio/mpeg" : "video/mp4",
             upsert: true
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
         });
 
         const { data: urlData } = await supabase.storage
-          .from("downloads")
+          .from("download")
           .createSignedUrl(fileName, 3600); // 1 hour expiry
           
         const fileUrl = urlData?.signedUrl;

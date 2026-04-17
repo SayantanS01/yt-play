@@ -5,11 +5,30 @@ import os from "os";
 
 // Detect if we are running in Vercel or local
 const IS_VERCEL = !!process.env.VERCEL;
-const binDir = path.join(process.cwd(), "bin");
-const localBinary = path.join(binDir, "yt-dlp");
 
-// Binary path: Use bundled binary in Vercel (Linux), or system/local for dev
-const YT_BINARY = (IS_VERCEL && fs.existsSync(localBinary)) ? localBinary : "yt-dlp";
+// Vercel Bulletproof Execution Registry
+let YT_BINARY = "yt-dlp";
+
+if (IS_VERCEL) {
+  const tracedBinary = path.join(process.cwd(), "bin", "yt-dlp");
+  const tmpBinary = path.join(os.tmpdir(), "yt-dlp");
+  
+  if (fs.existsSync(tracedBinary)) {
+    // Copy to /tmp to bypass Vercel read-only system and apply execute permissions
+    if (!fs.existsSync(tmpBinary)) {
+      try {
+        fs.copyFileSync(tracedBinary, tmpBinary);
+        fs.chmodSync(tmpBinary, 0o777);
+      } catch (e) {
+        console.error("[YouTube] Failed to mount executable in /tmp:", e);
+      }
+    }
+    YT_BINARY = fs.existsSync(tmpBinary) ? tmpBinary : tracedBinary;
+  }
+} else {
+  const localBinary = path.join(process.cwd(), "bin", "yt-dlp");
+  YT_BINARY = fs.existsSync(localBinary) ? localBinary : "yt-dlp";
+}
 
 console.log(`[YouTube] Init: Platform=${IS_VERCEL ? "VERCEL" : "LOCAL"}, Binary=${YT_BINARY}`);
 

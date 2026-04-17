@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
     const cleanup = async () => {
       if (storagePath) {
         console.log(`Cleaning up cloud resource: ${storagePath}`);
-        await supabase.storage.from("downloads").remove([storagePath]);
+        await supabase.storage.from("download").remove([storagePath]);
       }
       if (localPath) {
         const fullPath = path.join(os.tmpdir(), localPath);
