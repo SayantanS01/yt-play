@@ -20,10 +20,14 @@ const ensureBinary = async (): Promise<string> => {
     }
 
     const tmpBinary = path.join(os.tmpdir(), "yt-dlp");
-    if (fs.existsSync(tmpBinary)) return tmpBinary;
+    
+    // Check size to ensure we aren't executing the Python zipapp (~3MB). Compiled binary is >20MB.
+    if (fs.existsSync(tmpBinary) && fs.statSync(tmpBinary).size > 15000000) {
+      return tmpBinary;
+    }
 
     const tracedBinary = path.join(process.cwd(), "bin", "yt-dlp");
-    if (fs.existsSync(tracedBinary)) {
+    if (fs.existsSync(tracedBinary) && fs.statSync(tracedBinary).size > 15000000) {
       try {
         fs.copyFileSync(tracedBinary, tmpBinary);
         fs.chmodSync(tmpBinary, 0o777);
@@ -34,8 +38,8 @@ const ensureBinary = async (): Promise<string> => {
     }
 
     // Dynamic Download Fallback for Vercel
-    console.log("[YouTube] Downloading yt-dlp to /tmp dynamically...");
-    const url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+    console.log("[YouTube] Downloading yt-dlp_linux to /tmp dynamically...");
+    const url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
     
     return new Promise<string>((resolve, reject) => {
       const download = (dlUrl: string) => {

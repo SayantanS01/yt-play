@@ -18,10 +18,10 @@ async function installYtDlp() {
     return;
   }
 
-  // URL for the latest Linux binary
-  const downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+  // URL for the latest Linux binary (Standalone executable, no python3 needed!)
+  const downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
 
-  console.log(`[Setup] Downloading yt-dlp from ${downloadUrl}...`);
+  console.log(`[Setup] Downloading yt-dlp_linux from ${downloadUrl}...`);
 
   function download(url) {
     https.get(url, (res) => {
