@@ -32,7 +32,12 @@
     "recharts": "^3.8.1",
     "tailwind-merge": "^3.5.0",
     "youtube-po-token-generator": "^0.6.0",
-    "yt-dlp-wrap": "^2.3.12"
+    "yt-dlp-wrap": "^2.3.12",
+    "jsdom": "26.1.0"
+  },
+  "overrides": {
+    "jsdom": "26.1.0",
+    "parse5": "7.1.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -3,7 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/api/youtube/**/*': ['./bin/**/*', './lib/potoken/**/*']
-  }
+  },
+  serverExternalPackages: ['jsdom']
 };
 
 export default nextConfig;

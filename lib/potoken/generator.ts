@@ -1,7 +1,7 @@
-import { JSDOM, VirtualConsole } from 'jsdom';
 import fs from 'fs/promises';
 import path from 'path';
 import https from 'https';
+// Note: JSDOM is loaded dynamically inside createTask to avoid ESM/CJS interop issues on Vercel
 
 // Constants from PoToken generator
 const URL = 'https://www.youtube.com/embed/dQw4w9WgXcQ';
@@ -38,6 +38,9 @@ async function fetchVisitorData(): Promise<string> {
 }
 
 async function createTask(visitorData: string) {
+  // Dynamically load JSDOM for Vercel/ESM compatibility
+  const { JSDOM, VirtualConsole } = await import('jsdom');
+  
   // Use process.cwd() to ensure Vercel can find these files in the deployed lambda
   const assetsDir = path.join(process.cwd(), 'lib', 'potoken');
   
