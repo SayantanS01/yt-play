@@ -1,72 +1,10 @@
-import { spawn } from "child_process";
 import path from "path";
-import fs from "fs";
 import os from "os";
-
-// Detect if we are running in Vercel or local
-const IS_VERCEL = !!process.env.VERCEL;
-
-import https from "https";
+import { spawn } from "child_process";
+import fs from "fs";
 import { generate } from "./potoken/generator";
 
-let ytBinaryPromise: Promise<string> | null = null;
-
-const ensureBinary = async (): Promise<string> => {
-  if (ytBinaryPromise) return ytBinaryPromise;
-
-  ytBinaryPromise = (async () => {
-    if (!IS_VERCEL) {
-      const localBinary = path.join(process.cwd(), "bin", "yt-dlp");
-      return fs.existsSync(localBinary) ? localBinary : "yt-dlp";
-    }
-
-    const tmpBinary = path.join(os.tmpdir(), "yt-dlp");
-    
-    // Check size to ensure we aren't executing the Python zipapp (~3MB). Compiled binary is >20MB.
-    if (fs.existsSync(tmpBinary) && fs.statSync(tmpBinary).size > 15000000) {
-      return tmpBinary;
-    }
-
-    const tracedBinary = path.join(process.cwd(), "bin", "yt-dlp");
-    if (fs.existsSync(tracedBinary) && fs.statSync(tracedBinary).size > 15000000) {
-      try {
-        fs.copyFileSync(tracedBinary, tmpBinary);
-        fs.chmodSync(tmpBinary, 0o777);
-        return tmpBinary;
-      } catch (e) {
-        console.error("[YouTube] Failed to copy traced binary:", e);
-      }
-    }
-
-    // Dynamic Download Fallback for Vercel
-    console.log("[YouTube] Downloading yt-dlp_linux to /tmp dynamically...");
-    const url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
-    
-    return new Promise<string>((resolve, reject) => {
-      const download = (dlUrl: string) => {
-        https.get(dlUrl, (res) => {
-          if ([301, 302, 307, 308].includes(res.statusCode || 0)) {
-            return download(res.headers.location as string);
-          }
-          if (res.statusCode !== 200) {
-            reject(new Error(`Download failed with status ${res.statusCode}`));
-            return;
-          }
-          const file = fs.createWriteStream(tmpBinary);
-          res.pipe(file);
-          file.on('finish', () => {
-            file.close();
-            try { fs.chmodSync(tmpBinary, 0o777); resolve(tmpBinary); }
-            catch (err) { reject(err); }
-          });
-        }).on('error', reject);
-      };
-      download(url);
-    });
-  })();
-
-  return ytBinaryPromise;
-};
+const MOBILE_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
 
 export interface VideoMetadata {
   id: string;
@@ -76,58 +14,29 @@ export interface VideoMetadata {
   channel: string;
 }
 
-// Utility to extract only the JSON parts from yt-dlp output
-const parseYtDlpJson = (output: string) => {
-  const lines = output.split("\n");
-  for (const line of lines) {
-    if (line.trim().startsWith("{")) {
-      try {
-        return JSON.parse(line.trim());
-      } catch (e) {
-        continue;
-      }
-    }
+const ensureBinary = async (): Promise<string> => {
+  const isWindows = process.platform === "win32";
+  const binaryName = isWindows ? "yt-dlp.exe" : "yt-dlp";
+  const binaryPath = path.join(process.cwd(), "bin", binaryName);
+  
+  if (!fs.existsSync(binaryPath)) {
+    throw new Error(`yt-dlp binary not found at ${binaryPath}`);
   }
-  throw new Error("No valid JSON found in output");
+  
+  if (!isWindows) {
+    fs.chmodSync(binaryPath, 0o755);
+  }
+  
+  return binaryPath;
 };
 
-// Mobile App User-Agent to bypass strict bot detection
-const MOBILE_USER_AGENT = "com.google.android.youtube/19.29.37 (Linux; U; Android 11; en_US; Pixel 5; Build/RD1A.201105.003.C1) gzip";
-const WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-
-const getSanitizedCookiesPath = (): string | null => {
-  // Priority 1: Vercel Environment Variable (Content provided by user)
-  if (process.env.YT_COOKIES_CONTENT) {
-    const tempCookiesPath = path.join(os.tmpdir(), "cookies.txt");
-    // Write the cookies content once per session if it doesn't exist
-    if (!fs.existsSync(tempCookiesPath)) {
-      console.log(`[YouTube] Provisioning cookies from ENV var to ${tempCookiesPath}...`);
-      fs.writeFileSync(tempCookiesPath, process.env.YT_COOKIES_CONTENT, 'utf8');
-    }
-    return tempCookiesPath;
-  }
-
-  // Priority 2: Local File (Standard Dev)
-  const rootCookies = path.join(process.cwd(), "cookies.txt");
-  if (!fs.existsSync(rootCookies)) return null;
-
-  try {
-    const buffer = fs.readFileSync(rootCookies);
-    const isUtf16 = (buffer[0] === 0xFF && buffer[1] === 0xFE) || (buffer[0] === 0xFE && buffer[1] === 0xFF);
-    
-    if (isUtf16) {
-      console.log(`[YouTube] Detected UTF-16 encoding in cookies. Converting to UTF-8...`);
-      const content = buffer.toString('utf16le');
-      const sanitizedPath = path.join(os.tmpdir(), "sanitized_cookies.txt");
-      fs.writeFileSync(sanitizedPath, content, 'utf8');
-      return sanitizedPath;
-    }
-    
-    return rootCookies;
-  } catch (err) {
-    console.error(`[YouTube] Failed to sanitize cookies:`, err);
-    return rootCookies;
-  }
+const getSanitizedCookiesPath = () => {
+  const content = process.env.YT_COOKIES_CONTENT;
+  if (!content) return null;
+  
+  const tempPath = path.join(os.tmpdir(), "cookies.txt");
+  fs.writeFileSync(tempPath, content);
+  return tempPath;
 };
 
 // Cache for PoToken to avoid expensive regeneration (Expires in 30 mins)
@@ -153,7 +62,6 @@ const getAutomatedPoToken = async () => {
 // Common arguments for yt-dlp to handle signatures and warnings
 const getCommonArgs = async (options: { useAuth?: boolean, client?: "standard" | "tv" } = { useAuth: true, client: "standard" }) => {
   const sanitizedCookies = getSanitizedCookiesPath();
-  const hasCookies = !!sanitizedCookies || !!process.env.YT_COOKIES_BROWSER;
   const poData = await getAutomatedPoToken();
 
   const extractorArgs = [
@@ -163,7 +71,6 @@ const getCommonArgs = async (options: { useAuth?: boolean, client?: "standard" |
   ];
 
   // PoToken is ONLY compatible with standard clients (android/ios/web)
-  // The TV client uses a different signature scheme and will break if po_token is present
   if (poData && options.client !== "tv") {
     extractorArgs.push(`youtube:po_token=ios+${poData.poToken}`);
     extractorArgs.push(`visitor_data=${poData.visitorData}`);
@@ -175,7 +82,6 @@ const getCommonArgs = async (options: { useAuth?: boolean, client?: "standard" |
     "--no-warnings",
     "--no-check-certificates",
     "--js-runtime", "node",
-    // EXTRACTOR AGENTS: Use android_test,ios which are more stable against datacenter blocks
     "--extractor-args", extractorArgs.join(";"),
     "--geo-bypass",
     "--geo-bypass-country", process.env.YT_GEO_BYPASS_COUNTRY || "IN",
@@ -202,65 +108,56 @@ const getCommonArgs = async (options: { useAuth?: boolean, client?: "standard" |
 const spawnWithTimeout = async (args: string[], timeoutMs: number): Promise<{ stdout: string, stderr: string }> => {
   const binary = await ensureBinary();
   return new Promise((resolve, reject) => {
-    const ytProcess = spawn(binary, args);
+    const process = spawn(binary, args);
     let stdout = "";
     let stderr = "";
 
-    const timeout = setTimeout(() => {
-      ytProcess.kill("SIGKILL");
-      reject(new Error("Mastering Timeout: The extraction manifest failed to respond. YouTube may be limiting connections."));
+    const timer = setTimeout(() => {
+      process.kill();
+      reject(new Error(`Process timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
-    ytProcess.stdout.on("data", (data) => {
-      stdout += data.toString();
-    });
+    process.stdout.on("data", (data) => (stdout += data.toString()));
+    process.stderr.on("data", (data) => (stderr += data.toString()));
 
-    ytProcess.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
-
-    ytProcess.on("close", (code) => {
-      clearTimeout(timeout);
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        const errorMsg = stderr || "Process exited with error";
-        console.error(`[YouTube] Error: Binary exited with code ${code}. Stderr: ${errorMsg}`);
-        reject(new Error(errorMsg));
-      }
-    });
-
-    ytProcess.on("error", (err) => {
-      clearTimeout(timeout);
-      console.error(`[YouTube] Critical Spawn Error: ${err.message}. Binary Path: ${binary}`);
-      reject(new Error(`Failed to start extraction engine: ${err.message}`));
+    process.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(`Binary exited with code ${code}. Stderr: ${stderr}`));
     });
   });
 };
 
-export const getMetadata = async (url: string): Promise<VideoMetadata> => {
-  const commonArgs = await getCommonArgs();
-  const { stdout } = await spawnWithTimeout(["--dump-json", "--flat-playlist", "--no-warnings", ...commonArgs, url], 60000);
+const parseYtDlpJson = (stdout: string) => {
   try {
-    const json = parseYtDlpJson(stdout);
-    return {
-      id: json.id,
-      title: json.title,
-      thumbnail: json.thumbnail || json.thumbnails?.[0]?.url,
-      duration: json.duration,
-      channel: json.uploader || json.channel,
-    };
-  } catch (e: any) {
-    throw new Error("Failed to parse metadata: " + e.message);
+    return JSON.parse(stdout.split("\n")[0]);
+  } catch (e) {
+    throw new Error("Failed to parse yt-dlp JSON output");
   }
 };
 
+const parseOutput = (stdout: string): VideoMetadata[] => {
+  return stdout
+    .trim()
+    .split("\n")
+    .map((line) => {
+      try {
+        const json = JSON.parse(line);
+        return {
+          id: json.id,
+          title: json.title,
+          thumbnail: json.thumbnails?.[0]?.url || json.thumbnail,
+          duration: json.duration || 0,
+          channel: json.uploader || json.channel || "Unknown Artist",
+        };
+      } catch (e) { return null; }
+    })
+    .filter((v): v is VideoMetadata => v !== null);
+};
+
 export const getPlaylistMetadata = async (url: string): Promise<VideoMetadata[]> => {
-  const common = await getCommonArgs({ useAuth: false });
-  
-  // Strategy: Try standard extraction first, but rotate to TV client for Mixes/Radio
-  // The TV client is much more resilient for dynamic playlists
   const attemptExtraction = async (clientType: "standard" | "tv"): Promise<VideoMetadata[]> => {
+    const common = await getCommonArgs({ useAuth: false, client: clientType });
     const playlistArgs = [
       "--dump-json",
       "--flat-playlist",
@@ -270,9 +167,8 @@ export const getPlaylistMetadata = async (url: string): Promise<VideoMetadata[]>
     ];
 
     if (clientType === "tv") {
-      const tvArgs = await getCommonArgs({ useAuth: false, client: "tv" });
       console.log(`[YouTube] Rotating to CLEAN TV client for playlist manifest...`);
-      const { stdout } = await spawnWithTimeout([...playlistArgs, ...tvArgs, url], 120000);
+      const { stdout } = await spawnWithTimeout([...playlistArgs, ...common, url], 120000);
       return parseOutput(stdout);
     } else {
       const { stdout } = await spawnWithTimeout([...playlistArgs, ...common, url], 90000);
@@ -280,35 +176,14 @@ export const getPlaylistMetadata = async (url: string): Promise<VideoMetadata[]>
     }
   };
 
-  const parseOutput = (stdout: string): VideoMetadata[] => {
-    const lines = stdout.trim().split("\n");
-    return lines
-      .filter((line) => line.trim().startsWith("{"))
-      .map((line) => {
-        try {
-          const json = JSON.parse(line);
-          return {
-            id: json.id,
-            title: json.title,
-            thumbnail: json.thumbnails?.[0]?.url || json.thumbnail,
-            duration: json.duration || 0,
-            channel: json.uploader || json.channel || "Unknown Artist",
-          };
-        } catch (e) { return null; }
-      })
-      .filter((v): v is VideoMetadata => v !== null);
-  };
-
   try {
     let videos: VideoMetadata[] = [];
-    
     try {
       videos = await attemptExtraction("standard");
     } catch (e) {
       console.warn(`[YouTube] Standard extraction failed, checking fallback...`);
     }
     
-    // If standard extraction failed or only found 1 song on a potential playlist URL, try the TV fallback
     if (videos.length <= 1 && (url.includes("list=") || url.includes("radio=1"))) {
       try {
         const tvVideos = await attemptExtraction("tv");
@@ -331,9 +206,7 @@ export const getStreamUrl = async (id: string): Promise<string> => {
   const commonArgs = await getCommonArgs({ useAuth: false });
   const { stdout } = await spawnWithTimeout(["-g", "--no-playlist", ...commonArgs, "-f", "bestaudio/best", `https://www.youtube.com/watch?v=${id}`], 45000);
   const urls = stdout.trim().split("\n").filter(l => l.startsWith("http"));
-  if (urls.length > 0) {
-    return urls[0];
-  }
+  if (urls.length > 0) return urls[0];
   throw new Error("No stream URL in manifest");
 };
 
@@ -343,66 +216,60 @@ export const downloadFile = async (
   onProgress: (percent: string) => void
 ): Promise<string> => {
   const binary = await ensureBinary();
-  const commonArgs = await getCommonArgs({ useAuth: false });
-  
+  const tempDir = os.tmpdir();
+  const fileName = `${Date.now()}.${format === "mp3" ? "mp3" : "mp4"}`;
+  const filePath = path.join(tempDir, fileName);
+
   return new Promise((resolve, reject) => {
-    const tempDir = os.tmpdir();
-    const fileName = `${Date.now()}.${format === "mp3" ? "mp3" : "mp4"}`;
-    const filePath = path.join(tempDir, fileName);
+    // Hard process limit: 12 minutes
+    const globalTimeout = setTimeout(() => {
+      reject(new Error("Mastering Timeout: Total process duration exceeded limit (12m)."));
+    }, 720000);
 
-    const formatArgs =
-      format === "mp3"
-        // Use bestaudio but avoid complex post-processing that requires ffmpeg
-        ? ["-f", "bestaudio/best"]
-        // Use best mp4 that doesn't require merging (single-file format)
-        : ["-f", "best[ext=mp4]"];
+    const attemptDownload = async (clientType: "standard" | "tv") => {
+      const commonArgs = await getCommonArgs({ useAuth: false, client: clientType });
+      const formatArgs = format === "mp3" ? ["-f", "bestaudio/best"] : ["-f", "best[ext=mp4]"];
 
-    const ytProcess = spawn(binary, [...formatArgs, ...commonArgs, "--prefer-free-formats", "-o", filePath, url]);
-    let errorOutput = "";
-    
-    // Watchdog for progress: Kill process if no progress for 90 seconds
-    let lastProgressTime = Date.now();
-    const watchdog = setInterval(() => {
-      if (Date.now() - lastProgressTime > 90000) {
-        ytProcess.kill("SIGKILL");
+      const ytProcess = spawn(binary, [...formatArgs, ...commonArgs, "--prefer-free-formats", "-o", filePath, url]);
+      let errorOutput = "";
+      let lastProgressTime = Date.now();
+
+      const watchdog = setInterval(() => {
+        if (Date.now() - lastProgressTime > 90000) {
+          ytProcess.kill("SIGKILL");
+          clearInterval(watchdog);
+          reject(new Error("Mastering Timeout: Resource extraction stalled at current progress."));
+        }
+      }, 10000);
+
+      ytProcess.stdout.on("data", (data) => {
+        const match = data.toString().match(/(\d+\.\d+)%/);
+        if (match) {
+          lastProgressTime = Date.now();
+          onProgress(match[1]);
+        }
+      });
+
+      ytProcess.stderr.on("data", (data) => (errorOutput += data.toString()));
+
+      ytProcess.on("close", async (code) => {
         clearInterval(watchdog);
-        reject(new Error("Mastering Timeout: Resource extraction stalled at current progress."));
-      }
-    }, 10000);
+        if (code === 0) {
+          clearTimeout(globalTimeout);
+          onProgress("100.0");
+          resolve(filePath);
+        } else {
+          if (clientType === "standard" && (errorOutput.includes("Sign in") || errorOutput.includes("403"))) {
+            console.warn(`[YouTube] Download blocked by bot check, rotating to TV client fallback...`);
+            await attemptDownload("tv");
+          } else {
+            clearTimeout(globalTimeout);
+            reject(new Error(errorOutput || "Download failed"));
+          }
+        }
+      });
+    };
 
-    ytProcess.stdout.on("data", (data) => {
-      const output = data.toString();
-      // Improved regex to capture fragment and standard progress
-      const match = output.match(/(\d+\.\d+)%/);
-      if (match) {
-        lastProgressTime = Date.now();
-        onProgress(match[1]);
-      }
-    });
-
-    ytProcess.stderr.on("data", (data) => {
-       errorOutput += data.toString();
-       console.error("yt-dlp stderr:", data.toString());
-    });
-
-    ytProcess.on("close", (code) => {
-      clearInterval(watchdog);
-      if (code === 0) {
-        // Force one final progress pulse to 100% to ensure UI closure
-        onProgress("100.0");
-        resolve(filePath);
-      } else {
-        reject(new Error(errorOutput || "Download failed"));
-      }
-    });
-
-    // Hard process limit: 10 minutes
-    setTimeout(() => {
-      if (ytProcess.exitCode === null) {
-        ytProcess.kill("SIGKILL");
-        clearInterval(watchdog);
-        reject(new Error("Mastering Timeout: Total process duration exceeded limit (10m)."));
-      }
-    }, 600000);
+    attemptDownload("standard");
   });
 };
