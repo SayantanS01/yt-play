@@ -2,6 +2,7 @@ import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
 import os from "os";
+const { generate } = require("youtube-po-token-generator");
 
 // Detect if we are running in Vercel or local
 const IS_VERCEL = !!process.env.VERCEL;
@@ -129,21 +130,49 @@ const getSanitizedCookiesPath = (): string | null => {
   }
 };
 
+// Cache for PoToken to avoid expensive regeneration (Expires in 30 mins)
+let cachedPoToken: { visitorData: string, poToken: string, timestamp: number } | null = null;
+
+const getAutomatedPoToken = async () => {
+  const NOW = Date.now();
+  if (cachedPoToken && (NOW - cachedPoToken.timestamp) < 1800000) {
+    return cachedPoToken;
+  }
+
+  try {
+    console.log("[YouTube] Generating fresh PoToken for session integrity...");
+    const data = await generate();
+    cachedPoToken = { ...data, timestamp: NOW };
+    return cachedPoToken;
+  } catch (err) {
+    console.error("[YouTube] PoToken generation failed:", err);
+    return null;
+  }
+};
+
 // Common arguments for yt-dlp to handle signatures and warnings
-const getCommonArgs = () => {
+const getCommonArgs = async () => {
   const sanitizedCookies = getSanitizedCookiesPath();
   const hasCookies = !!sanitizedCookies || !!process.env.YT_COOKIES_BROWSER;
+  const poData = await getAutomatedPoToken();
+
+  const extractorArgs = [
+    `youtube:player_client=android_test,ios`,
+  ];
+
+  if (poData) {
+    extractorArgs.push(`youtube:po_token=ios+${poData.poToken}`);
+    extractorArgs.push(`visitor_data=${poData.visitorData}`);
+  } else if (process.env.YT_PO_TOKEN) {
+    extractorArgs.push(`youtube:po_token=${process.env.YT_PO_TOKEN}`);
+  }
 
   const args = [
     "--no-warnings",
     "--no-check-certificates",
     "--js-runtime", "node",
     // EXTRACTOR AGENTS: Use android_test,ios which are more stable against datacenter blocks
-    // We avoid 'web' as it triggers the most bot challenges on Vercel IPs.
-    "--extractor-args", [
-      `youtube:player_client=android_test,ios`,
-      process.env.YT_PO_TOKEN ? `youtube:po_token=${process.env.YT_PO_TOKEN}` : ""
-    ].filter(Boolean).join(";"),
+    "--extractor-args", extractorArgs.join(";"),
     "--geo-bypass",
     "--geo-bypass-country", process.env.YT_GEO_BYPASS_COUNTRY || "IN",
     "--user-agent", MOBILE_USER_AGENT,
@@ -206,7 +235,8 @@ const spawnWithTimeout = async (args: string[], timeoutMs: number): Promise<{ st
 };
 
 export const getMetadata = async (url: string): Promise<VideoMetadata> => {
-  const { stdout } = await spawnWithTimeout(["--dump-json", "--flat-playlist", ...getCommonArgs(), url], 60000);
+  const commonArgs = await getCommonArgs();
+  const { stdout } = await spawnWithTimeout(["--dump-json", "--flat-playlist", "--no-warnings", ...commonArgs, url], 60000);
   try {
     const json = parseYtDlpJson(stdout);
     return {
@@ -222,7 +252,7 @@ export const getMetadata = async (url: string): Promise<VideoMetadata> => {
 };
 
 export const getPlaylistMetadata = async (url: string): Promise<VideoMetadata[]> => {
-  const common = getCommonArgs();
+  const common = await getCommonArgs();
   
   // Strategy: Try standard extraction first, but rotate to TV client for Mixes/Radio
   // The TV client is much more resilient for dynamic playlists
@@ -237,7 +267,7 @@ export const getPlaylistMetadata = async (url: string): Promise<VideoMetadata[]>
 
     if (clientType === "tv") {
       // Override client to TV for the fallback attempt
-      const tvArgs = common.map(arg => arg.startsWith("youtube:player_client=") ? "youtube:player_client=tv" : arg);
+      const tvArgs = common.map(arg => arg.includes("player_client=") ? "--extractor-args=youtube:player_client=tv" : arg);
       console.log(`[YouTube] Rotating to TV client for playlist manifest...`);
       const { stdout } = await spawnWithTimeout([...playlistArgs, ...tvArgs, url], 120000);
       return parseOutput(stdout);
@@ -295,7 +325,8 @@ export const getPlaylistMetadata = async (url: string): Promise<VideoMetadata[]>
 };
 
 export const getStreamUrl = async (id: string): Promise<string> => {
-  const { stdout } = await spawnWithTimeout(["-g", "--no-playlist", ...getCommonArgs(), "-f", "bestaudio/best", `https://www.youtube.com/watch?v=${id}`], 45000);
+  const commonArgs = await getCommonArgs();
+  const { stdout } = await spawnWithTimeout(["-g", "--no-playlist", ...commonArgs, "-f", "bestaudio/best", `https://www.youtube.com/watch?v=${id}`], 45000);
   const urls = stdout.trim().split("\n").filter(l => l.startsWith("http"));
   if (urls.length > 0) {
     return urls[0];
@@ -321,7 +352,9 @@ export const downloadFile = async (
         // Use best mp4 that doesn't require merging (single-file format)
         : ["-f", "best[ext=mp4]"];
 
-    const ytProcess = spawn(binary, [...formatArgs, ...getCommonArgs(), "--prefer-free-formats", "-o", filePath, url]);
+    const commonArgs = await getCommonArgs();
+    
+    const ytProcess = spawn(binary, [...formatArgs, ...commonArgs, "--prefer-free-formats", "-o", filePath, url]);
     let errorOutput = "";
     
     // Watchdog for progress: Kill process if no progress for 90 seconds
