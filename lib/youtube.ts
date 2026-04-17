@@ -138,17 +138,18 @@ const getCommonArgs = () => {
     "--no-warnings",
     "--no-check-certificates",
     "--js-runtime", "node",
-    // IF we have cookies, use "web" client which matches browser cookies
-    // IF we have NO cookies, use "android" client for mobile bypass
-    // High-resilience extraction tactics:
-    // 1. Use "ios" client which is currently more stable than "android" or "web"
-    // 2. Add geo-bypass to help sync with cookie region
-    // 3. Impersonate a real browser more aggressively
-    "--extractor-args", `youtube:player_client=${hasCookies ? "web,ios" : "ios,android"}`,
+    // EXTRACTOR AGENTS: Use android_test,ios which are more stable against datacenter blocks
+    // We avoid 'web' as it triggers the most bot challenges on Vercel IPs.
+    "--extractor-args", [
+      `youtube:player_client=android_test,ios`,
+      process.env.YT_PO_TOKEN ? `youtube:po_token=${process.env.YT_PO_TOKEN}` : ""
+    ].filter(Boolean).join(";"),
     "--geo-bypass",
     "--geo-bypass-country", process.env.YT_GEO_BYPASS_COUNTRY || "IN",
-    "--user-agent", hasCookies ? WEB_USER_AGENT : MOBILE_USER_AGENT,
+    "--user-agent", MOBILE_USER_AGENT,
     "--add-header", "Accept-Language:en-US,en;q=0.9",
+    "--add-header", "X-Youtube-Client-Name:3",
+    "--add-header", "X-Youtube-Client-Version:19.29.37",
     "--no-cache-dir"
   ];
 
