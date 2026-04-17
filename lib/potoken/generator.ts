@@ -1,7 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
 import https from 'https';
-// Note: JSDOM is loaded dynamically inside createTask to avoid ESM/CJS interop issues on Vercel
 
 // Constants from PoToken generator
 const URL = 'https://www.youtube.com/embed/dQw4w9WgXcQ';
@@ -14,7 +13,8 @@ const HEADERS = {
 
 async function fetchVisitorData(): Promise<string> {
   return new Promise((resolve, reject) => {
-    https.get(URL, { headers: HEADERS }, (res) => {
+    // Add a 5s timeout to the network fetch
+    const req = https.get(URL, { headers: HEADERS }, (res) => {
       let data = '';
       res.on('data', (chunk) => data += chunk);
       res.on('end', () => {
@@ -27,82 +27,111 @@ async function fetchVisitorData(): Promise<string> {
             }
           } catch (e) {}
         }
-        // Fallback or secondary match
         const match2 = data.match(/"visitorData"\s*:\s*"(.+?)"/);
         if (match2) return resolve(match2[1]);
         
         reject(new Error('Failed to fetch visitorData from YouTube embed'));
       });
-    }).on('error', reject);
+    });
+
+    req.on('error', reject);
+    req.setTimeout(5000, () => {
+      req.destroy();
+      reject(new Error('VisitorData fetch timed out'));
+    });
   });
 }
 
 async function createTask(visitorData: string) {
-  // Dynamically load JSDOM for Vercel/ESM compatibility
   const { JSDOM, VirtualConsole } = await import('jsdom');
-  
-  // Use process.cwd() to ensure Vercel can find these files in the deployed lambda
   const assetsDir = path.join(process.cwd(), 'lib', 'potoken');
   
   const domContent = await fs.readFile(path.join(assetsDir, 'vendor', 'index.html'), 'utf-8');
   const baseContent = await fs.readFile(path.join(assetsDir, 'vendor', 'base.js'), 'utf-8');
   const injectContent = await fs.readFile(path.join(assetsDir, 'inject.js'), 'utf-8');
 
-  let destroy: (() => void) | undefined = undefined;
-
   return {
     start: async (): Promise<{ poToken: string }> => {
-      // YouTube signatures are typically 164 chars
-      while (true) {
-        const { poToken } = await new Promise<{ poToken: string }>(async (res, rej) => {
-          const dom = new JSDOM(domContent, {
-            url: URL,
-            pretendToBeVisual: true,
-            runScripts: 'dangerously',
-            virtualConsole: new VirtualConsole(),
+      // MAX ATTEMPTS: Prevent infinite loops on Vercel
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        let windowRef: any = null;
+        
+        try {
+          console.log(`[YouTube] PoToken Attempt ${attempt}/5...`);
+          
+          const result = await new Promise<{ poToken: string }>((resolve, reject) => {
+            const dom = new JSDOM(domContent, {
+              url: URL,
+              pretendToBeVisual: true,
+              runScripts: 'dangerously',
+              virtualConsole: new VirtualConsole(), // Keeps logs clean but we can add listeners for debug
+            });
+
+            windowRef = dom.window;
+            
+            // Watchdog for this specific attempt (8 seconds)
+            const attemptTimeout = setTimeout(() => {
+              reject(new Error('PoToken attempt timed out'));
+            }, 8000);
+
+            Object.defineProperty(windowRef.navigator, 'userAgent', { value: USER_AGENT, writable: false });
+            windowRef.visitorData = visitorData;
+            windowRef.onPoToken = (token: string) => {
+              clearTimeout(attemptTimeout);
+              resolve({ poToken: token });
+            };
+
+            const scriptToEval = baseContent.replace(
+              /}\s*\)\(_yt_player\);\s*$/, 
+              (matched) => `;${injectContent};${matched}`
+            );
+
+            try {
+              windowRef.eval(scriptToEval);
+            } catch (e) {
+              clearTimeout(attemptTimeout);
+              reject(e);
+            }
           });
 
-          const { window } = dom;
-          
-          // Mimic browser environment
-          Object.defineProperty(window.navigator, 'userAgent', { value: USER_AGENT, writable: false });
-          (window as any).visitorData = visitorData;
-          (window as any).onPoToken = (token: string) => {
-            res({ poToken: token });
-          };
-
-          // Injected logic: intercept the token generation
-          const scriptToEval = baseContent.replace(
-            /}\s*\)\(_yt_player\);\s*$/, 
-            (matched) => `;${injectContent};${matched}`
-          );
-
-          try {
-            window.eval(scriptToEval);
-          } catch (e) {
-            rej(e);
+          if (result.poToken && result.poToken.length >= 100) {
+            console.log(`[YouTube] PoToken Generated Successfully (Length: ${result.poToken.length})`);
+            return result;
           }
-
-          destroy = () => {
-            window.close();
-            rej(new Error('Window closed'));
-          };
-        }).finally(() => {
-          if (destroy) destroy();
-        });
-
-        if (poToken && poToken.length === 164) {
-          return { poToken };
+        } catch (err: any) {
+          console.error(`[YouTube] PoToken Attempt ${attempt} failed: ${err.message}`);
+        } finally {
+          if (windowRef) {
+            try { windowRef.close(); } catch (e) {}
+          }
         }
-        // If token is invalid, loop continues
+        
+        // Brief pause between attempts
+        await new Promise(r => setTimeout(r, 200));
       }
+      
+      throw new Error('PoToken generation failed after 5 attempts');
     }
   };
 }
 
 export async function generate() {
-  const visitorData = await fetchVisitorData();
-  const task = await createTask(visitorData);
-  const { poToken } = await task.start();
-  return { visitorData, poToken };
+  try {
+    // Overall guard for the entire operation (15 seconds)
+    return await Promise.race([
+      (async () => {
+        const visitorData = await fetchVisitorData();
+        const task = await createTask(visitorData);
+        return await task.start();
+      })(),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Overall PoToken generation timed out (15s)')), 15000)
+      )
+    ]);
+  } catch (err: any) {
+    console.error(`[YouTube] Automated PoToken failure: ${err.message}`);
+    // Return placeholder or re-throw? 
+    // Re-throwing allows standard extraction to attempt its own bypass
+    throw err;
+  }
 }
