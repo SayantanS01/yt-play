@@ -340,6 +340,8 @@ export const downloadFile = async (
   onProgress: (percent: string) => void
 ): Promise<string> => {
   const binary = await ensureBinary();
+  const commonArgs = await getCommonArgs();
+  
   return new Promise((resolve, reject) => {
     const tempDir = os.tmpdir();
     const fileName = `${Date.now()}.${format === "mp3" ? "mp3" : "mp4"}`;
@@ -352,8 +354,6 @@ export const downloadFile = async (
         // Use best mp4 that doesn't require merging (single-file format)
         : ["-f", "best[ext=mp4]"];
 
-    const commonArgs = await getCommonArgs();
-    
     const ytProcess = spawn(binary, [...formatArgs, ...commonArgs, "--prefer-free-formats", "-o", filePath, url]);
     let errorOutput = "";
     
