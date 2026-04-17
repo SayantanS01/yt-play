@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Manrope } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const inter = Inter({
@@ -28,6 +29,7 @@ export default function RootLayout({
         className={`${inter.variable} ${manrope.variable} font-body bg-background text-foreground min-h-full antialiased`}
       >
         {children}
+        <Analytics />
       </body>
     </html>
   );
