@@ -47,17 +47,36 @@ export async function GET(req: NextRequest) {
     } else if (fileUrl) {
       // HANDLE REMOTE/STORAGE TRANSPORT
       const isStream = searchParams.get("type") === "stream";
+      const isYouTube = fileUrl.includes("googlevideo.com") || fileUrl.includes("youtube.com");
       
-      const fetchHeaders: any = {};
-      if (isStream) {
-        fetchHeaders["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+      const fetchHeaders: any = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.youtube.com/",
+        "Origin": "https://www.youtube.com"
+      };
+
+      // CRITICAL: Inject YouTube cookies if we have them and it's a YouTube URL
+      if (isYouTube && process.env.YT_COOKIES_CONTENT) {
+        // Simple conversion for fetch headers
+        fetchHeaders["Cookie"] = process.env.YT_COOKIES_CONTENT;
       }
+
       if (range) {
         fetchHeaders["Range"] = range;
       }
 
-      const response = await fetch(fileUrl, { headers: fetchHeaders });
-      if (!response.ok && response.status !== 206) throw new Error("Faulty storage handshake");
+      const response = await fetch(fileUrl, { 
+        headers: fetchHeaders,
+        cache: "no-store"
+      });
+
+      if (!response.ok && response.status !== 206) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        console.error(`[Proxy] Upstream Error (${response.status}): ${errorText.substring(0, 100)}`);
+        throw new Error(`Faulty storage handshake: Upstream returned ${response.status}`);
+      }
       
       body = response.body;
       status = response.status;
