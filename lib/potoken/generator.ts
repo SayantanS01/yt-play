@@ -122,7 +122,8 @@ export async function generate() {
       (async () => {
         const visitorData = await fetchVisitorData();
         const task = await createTask(visitorData);
-        return await task.start();
+        const { poToken } = await task.start();
+        return { visitorData, poToken };
       })(),
       new Promise<never>((_, reject) => 
         setTimeout(() => reject(new Error('Overall PoToken generation timed out (15s)')), 15000)
