@@ -55,6 +55,12 @@ export async function POST(req: NextRequest) {
           controller.enqueue(encoder.encode(JSON.stringify({ progress }) + "\n"));
         });
 
+        // Verification: Ensure bucket is reachable before buffering
+        const { data: bucketData, error: bucketError } = await supabase.storage.getBucket("download");
+        if (bucketError) {
+          throw new Error(`Cloud storage setup error: '${bucketError.message}'. Please ensure you have created the 'download' bucket in your Supabase dashboard.`);
+        }
+
         // Upload to Supabase to bypass Vercel statelessness
         controller.enqueue(encoder.encode(JSON.stringify({ status: "uploading" }) + "\n"));
         
