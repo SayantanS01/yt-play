@@ -6,31 +6,62 @@ import os from "os";
 // Detect if we are running in Vercel or local
 const IS_VERCEL = !!process.env.VERCEL;
 
-// Vercel Bulletproof Execution Registry
-let YT_BINARY = "yt-dlp";
+import https from "https";
 
-if (IS_VERCEL) {
-  const tracedBinary = path.join(process.cwd(), "bin", "yt-dlp");
-  const tmpBinary = path.join(os.tmpdir(), "yt-dlp");
-  
-  if (fs.existsSync(tracedBinary)) {
-    // Copy to /tmp to bypass Vercel read-only system and apply execute permissions
-    if (!fs.existsSync(tmpBinary)) {
+let ytBinaryPromise: Promise<string> | null = null;
+
+const ensureBinary = async (): Promise<string> => {
+  if (ytBinaryPromise) return ytBinaryPromise;
+
+  ytBinaryPromise = (async () => {
+    if (!IS_VERCEL) {
+      const localBinary = path.join(process.cwd(), "bin", "yt-dlp");
+      return fs.existsSync(localBinary) ? localBinary : "yt-dlp";
+    }
+
+    const tmpBinary = path.join(os.tmpdir(), "yt-dlp");
+    if (fs.existsSync(tmpBinary)) return tmpBinary;
+
+    const tracedBinary = path.join(process.cwd(), "bin", "yt-dlp");
+    if (fs.existsSync(tracedBinary)) {
       try {
         fs.copyFileSync(tracedBinary, tmpBinary);
         fs.chmodSync(tmpBinary, 0o777);
+        return tmpBinary;
       } catch (e) {
-        console.error("[YouTube] Failed to mount executable in /tmp:", e);
+        console.error("[YouTube] Failed to copy traced binary:", e);
       }
     }
-    YT_BINARY = fs.existsSync(tmpBinary) ? tmpBinary : tracedBinary;
-  }
-} else {
-  const localBinary = path.join(process.cwd(), "bin", "yt-dlp");
-  YT_BINARY = fs.existsSync(localBinary) ? localBinary : "yt-dlp";
-}
 
-console.log(`[YouTube] Init: Platform=${IS_VERCEL ? "VERCEL" : "LOCAL"}, Binary=${YT_BINARY}`);
+    // Dynamic Download Fallback for Vercel
+    console.log("[YouTube] Downloading yt-dlp to /tmp dynamically...");
+    const url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+    
+    return new Promise<string>((resolve, reject) => {
+      const download = (dlUrl: string) => {
+        https.get(dlUrl, (res) => {
+          if ([301, 302, 307, 308].includes(res.statusCode || 0)) {
+            return download(res.headers.location as string);
+          }
+          if (res.statusCode !== 200) {
+            reject(new Error(`Download failed with status ${res.statusCode}`));
+            return;
+          }
+          const file = fs.createWriteStream(tmpBinary);
+          res.pipe(file);
+          file.on('finish', () => {
+            file.close();
+            try { fs.chmodSync(tmpBinary, 0o777); resolve(tmpBinary); }
+            catch (err) { reject(err); }
+          });
+        }).on('error', reject);
+      };
+      download(url);
+    });
+  })();
+
+  return ytBinaryPromise;
+};
 
 export interface VideoMetadata {
   id: string;
@@ -124,9 +155,10 @@ const getCommonArgs = () => {
   return args;
 };
 
-const spawnWithTimeout = (args: string[], timeoutMs: number): Promise<{ stdout: string, stderr: string }> => {
+const spawnWithTimeout = async (args: string[], timeoutMs: number): Promise<{ stdout: string, stderr: string }> => {
+  const binary = await ensureBinary();
   return new Promise((resolve, reject) => {
-    const ytProcess = spawn(YT_BINARY, args);
+    const ytProcess = spawn(binary, args);
     let stdout = "";
     let stderr = "";
 
@@ -156,7 +188,7 @@ const spawnWithTimeout = (args: string[], timeoutMs: number): Promise<{ stdout: 
 
     ytProcess.on("error", (err) => {
       clearTimeout(timeout);
-      console.error(`[YouTube] Critical Spawn Error: ${err.message}. Binary Path: ${YT_BINARY}`);
+      console.error(`[YouTube] Critical Spawn Error: ${err.message}. Binary Path: ${binary}`);
       reject(new Error(`Failed to start extraction engine: ${err.message}`));
     });
   });
@@ -260,11 +292,12 @@ export const getStreamUrl = async (id: string): Promise<string> => {
   throw new Error("No stream URL in manifest");
 };
 
-export const downloadFile = (
+export const downloadFile = async (
   url: string,
   format: "mp4" | "mp3",
   onProgress: (percent: string) => void
 ): Promise<string> => {
+  const binary = await ensureBinary();
   return new Promise((resolve, reject) => {
     const tempDir = os.tmpdir();
     const fileName = `${Date.now()}.${format === "mp3" ? "mp3" : "mp4"}`;
@@ -275,7 +308,7 @@ export const downloadFile = (
         ? ["-x", "--audio-format", "mp3", "-f", "bestaudio/best"]
         : ["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"];
 
-    const ytProcess = spawn(YT_BINARY, [...formatArgs, ...getCommonArgs(), "--prefer-free-formats", "-o", filePath, url]);
+    const ytProcess = spawn(binary, [...formatArgs, ...getCommonArgs(), "--prefer-free-formats", "-o", filePath, url]);
     let errorOutput = "";
     
     // Watchdog for progress: Kill process if no progress for 90 seconds
