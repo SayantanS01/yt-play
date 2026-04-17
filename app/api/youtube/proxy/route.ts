@@ -14,6 +14,9 @@ export async function GET(req: NextRequest) {
   try {
     let body: any;
     let headers: Headers;
+    let status = 200;
+
+    const range = req.headers.get("range");
 
     if (localPath) {
       // HANDLE LOCAL TRANSPORT
@@ -22,27 +25,45 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "Local resource expired or missing" }, { status: 404 });
       }
 
-      const fileStream = fs.createReadStream(fullPath);
-      body = fileStream;
+      const stats = fs.statSync(fullPath);
       headers = new Headers();
       headers.set("Content-Type", filename.endsWith(".mp3") ? "audio/mpeg" : "video/mp4");
-      
-      const stats = fs.statSync(fullPath);
-      headers.set("Content-Length", stats.size.toString());
+      headers.set("Accept-Ranges", "bytes");
+
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
+        const chunksize = (end - start) + 1;
+        
+        body = fs.createReadStream(fullPath, { start, end });
+        status = 206;
+        headers.set("Content-Range", `bytes ${start}-${end}/${stats.size}`);
+        headers.set("Content-Length", chunksize.toString());
+      } else {
+        body = fs.createReadStream(fullPath);
+        headers.set("Content-Length", stats.size.toString());
+      }
     } else if (fileUrl) {
       // HANDLE REMOTE/STORAGE TRANSPORT
       const isStream = searchParams.get("type") === "stream";
       
       const fetchHeaders: any = {};
       if (isStream) {
-        // Use a consistent User-Agent for streaming to match extraction
         fetchHeaders["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+      }
+      if (range) {
+        fetchHeaders["Range"] = range;
       }
 
       const response = await fetch(fileUrl, { headers: fetchHeaders });
-      if (!response.ok) throw new Error("Faulty storage handshake");
+      if (!response.ok && response.status !== 206) throw new Error("Faulty storage handshake");
+      
       body = response.body;
+      status = response.status;
       headers = new Headers(response.headers);
+
+      headers.set("Accept-Ranges", "bytes");
 
       // If it's a stream, ensure the browser treats it as audio/mpeg or similar if it doesn't already
       if (isStream && !headers.get("Content-Type")?.includes("audio")) {
@@ -88,7 +109,7 @@ export async function GET(req: NextRequest) {
     }
 
     return new Response(readable, {
-      status: 200,
+      status: status,
       headers: headers,
     });
   } catch (error: any) {

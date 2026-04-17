@@ -55,10 +55,27 @@ export async function POST(req: NextRequest) {
           controller.enqueue(encoder.encode(JSON.stringify({ progress }) + "\n"));
         });
 
-        // LOCAL TRANSPORT BYPASS: Skip Supabase upload and return local reference
-        controller.enqueue(encoder.encode(JSON.stringify({ status: "local_ready" }) + "\n"));
+        // Upload to Supabase to bypass Vercel statelessness
+        controller.enqueue(encoder.encode(JSON.stringify({ status: "uploading" }) + "\n"));
         
         const fileName = path.basename(filePath);
+        const fileBuffer = fs.readFileSync(filePath);
+        
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from("downloads")
+          .upload(fileName, fileBuffer, {
+            contentType: format === "mp3" ? "audio/mpeg" : "video/mp4",
+            upsert: true
+          });
+          
+        if (uploadError) {
+          throw new Error("Cloud storage upload failed: " + uploadError.message);
+        }
+
+        // Clean up the local tmp file because we're on serverless
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
         
         // Success logging in Database
         await prisma.download.create({
@@ -80,13 +97,21 @@ export async function POST(req: NextRequest) {
           }
         });
 
+        const { data: urlData } = await supabase.storage
+          .from("downloads")
+          .createSignedUrl(fileName, 3600); // 1 hour expiry
+          
+        const fileUrl = urlData?.signedUrl;
+        
+        if (!fileUrl) {
+           throw new Error("Failed to generate download link.");
+        }
+
         controller.enqueue(encoder.encode(JSON.stringify({ 
           status: "completed", 
-          url: `/api/youtube/proxy?localPath=${encodeURIComponent(fileName)}&filename=${encodeURIComponent(metadata.title)}.${format}`,
-          isLocal: true
+          url: `/api/youtube/proxy?url=${encodeURIComponent(fileUrl)}&storagePath=${encodeURIComponent(fileName)}&filename=${encodeURIComponent(metadata.title)}.${format}`,
+          isLocal: false
         }) + "\n"));
-
-        // Note: fs.unlinkSync(filePath) is NOT called here because the proxy will handle it after the download.
 
       } catch (error: any) {
         if (heartbeat) clearInterval(heartbeat);
